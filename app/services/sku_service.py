@@ -2,11 +2,9 @@ import logging
 from uuid import uuid4, UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-
-from sqlalchemy import func
 
 from app.models.images import SKUImageModel
 from app.models.products import ProductModel, ProductStatus
@@ -38,7 +36,7 @@ class SKUService:
         if sku is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="SKU not found",
+                detail={"code": "NOT_FOUND", "message": "SKU not found"},
             )
         return sku
 
@@ -53,12 +51,12 @@ class SKUService:
         if product is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Product not found",
+                detail={"code": "NOT_FOUND", "message": "Product not found"},
             )
         if product.seller_id != seller_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not own this product",
+                detail={"code": "NOT_OWNER", "message": "Product does not belong to the authenticated seller"},
             )
         return product
 
@@ -73,9 +71,16 @@ class SKUService:
 
         if product.status == ProductStatus.HARD_BLOCKED:
             raise HTTPException(
-                status_code=403,
+                status_code=status.HTTP_403_FORBIDDEN,
                 detail={"code": "FORBIDDEN", "message": "Cannot add SKU to hard-blocked product"},
             )
+
+        if not data.images:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_REQUEST", "message": "image is required"},
+            )
+
         is_first_sku = product.status == ProductStatus.CREATED
 
         characteristics = [
@@ -93,18 +98,18 @@ class SKUService:
             characteristics=characteristics,
         )
         session.add(sku)
-        await session.flush()  # get sku.id
+        await session.flush()
 
         for img in data.images:
             session.add(SKUImageModel(sku_id=sku.id, url=img.url, ordering=img.ordering))
 
+        if is_first_sku:
+            product.status = ProductStatus.ON_MODERATION
+
         await session.commit()
 
+        # Fire after commit so the transaction is safe regardless of Moderation availability
         if is_first_sku:
-            product = await session.get(ProductModel, data.product_id)
-            product.status = ProductStatus.ON_MODERATION
-            session.add(product)
-            await session.commit()
             from app.services.event_service import send_product_event_to_moderation
             await send_product_event_to_moderation(session, data.product_id, product.seller_id, "CREATED")
 
@@ -121,8 +126,13 @@ class SKUService:
     ) -> SKUModel:
         sku = await cls.get_by_id(session, sku_id)
 
-        # Verify ownership via product
         product = await cls._verify_product_ownership(session, sku.product_id, seller_id)
+
+        if product.status == ProductStatus.HARD_BLOCKED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FORBIDDEN", "message": "Cannot edit SKU of a hard-blocked product"},
+            )
 
         update_data = data.model_dump(exclude_unset=True)
 
@@ -132,20 +142,12 @@ class SKUService:
                 for c in update_data["characteristics"]
             ]
 
-        # Hard-blocked products cannot be edited
-        if product.status == ProductStatus.HARD_BLOCKED:
-            raise HTTPException(
-                status_code=403,
-                detail="Cannot edit SKU of a hard-blocked product",
-            )
-
         for field, value in update_data.items():
             setattr(sku, field, value)
 
         session.add(sku)
         await session.flush()
 
-        # If the parent product is MODERATED or BLOCKED, send it back to moderation
         if product.status in (ProductStatus.MODERATED, ProductStatus.BLOCKED):
             product.status = ProductStatus.ON_MODERATION
             session.add(product)
@@ -169,16 +171,15 @@ class SKUService:
 
         if sku.reserved_quantity > 0:
             raise HTTPException(
-                status_code=409,
+                status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "CONFLICT", "message": "Cannot delete SKU with active reserves"},
             )
 
-        # Verify ownership via product
         product = await cls._verify_product_ownership(session, sku.product_id, seller_id)
 
         if product.status == ProductStatus.HARD_BLOCKED:
             raise HTTPException(
-                status_code=403,
+                status_code=status.HTTP_403_FORBIDDEN,
                 detail={"code": "FORBIDDEN", "message": "Cannot delete SKU of hard-blocked product"},
             )
 
@@ -192,7 +193,6 @@ class SKUService:
         await session.delete(sku)
         await session.flush()
 
-        # If no SKUs remain and product was ON_MODERATION → revert to CREATED
         remaining = await session.scalar(
             select(func.count()).select_from(SKUModel).where(SKUModel.product_id == product_id)
         )
