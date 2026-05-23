@@ -119,9 +119,8 @@ async def test_missing_images_returns_400(client, mock_session):
 
     assert resp.status_code == 400
     body = resp.json()
-    detail = body.get("detail", body)
-    assert detail["code"] == "INVALID_REQUEST"
-    assert "image" in detail["message"].lower()
+    assert body["code"] == "INVALID_REQUEST"
+    assert "image" in body["message"].lower()
 
 
 @pytest.mark.asyncio
@@ -135,6 +134,9 @@ async def test_missing_category_returns_400(client, mock_session):
     )
     # Pydantic rejects missing required field with 422
     assert resp.status_code == 422
+    body = resp.json()
+    assert body["code"] == "INVALID_REQUEST"
+    assert "detail" not in body
 
 
 @pytest.mark.asyncio
@@ -155,9 +157,8 @@ async def test_invalid_category_id_returns_400(client, mock_session):
 
     assert resp.status_code == 400
     body = resp.json()
-    detail = body.get("detail", body)
-    assert detail["code"] == "INVALID_REQUEST"
-    assert "category" in detail["message"].lower()
+    assert body["code"] == "INVALID_REQUEST"
+    assert "category" in body["message"].lower()
 
 
 @pytest.mark.asyncio
@@ -170,13 +171,20 @@ async def test_missing_title_returns_422(client, mock_session):
         headers={"Authorization": f"Bearer {make_seller_token()}"},
     )
     assert resp.status_code == 422
+    body = resp.json()
+    assert body["code"] == "INVALID_REQUEST"
+    assert "detail" not in body
 
 
 @pytest.mark.asyncio
 async def test_unauthenticated_returns_401(client, mock_session):
-    """Запрос без токена → 401."""
+    """Запрос без токена → 401 с top-level {code, message}."""
     resp = await client.post("/api/v1/products", json=VALID_PRODUCT_PAYLOAD)
     assert resp.status_code == 401
+    body = resp.json()
+    assert "code" in body and "message" in body
+    assert "detail" not in body
+    assert body["code"] == "UNAUTHORIZED"
 
 
 @pytest.mark.asyncio

@@ -32,7 +32,7 @@ def _decode_token(token: str) -> dict[str, Any]:
     except InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
+            detail={"code": "UNAUTHORIZED", "message": "Invalid token"},
         )
 
 
@@ -47,14 +47,16 @@ async def get_current_active_auth_seller(request: Request) -> dict[str, Any]:
     token = _extract_bearer(request)
     if not token:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "Authentication required"},
         )
 
     payload = _decode_token(token)
 
     if payload.get("account_type") not in ("seller", "admin"):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Seller access required"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Seller access required"},
         )
 
     return payload
@@ -64,14 +66,16 @@ async def get_current_active_auth_admin(request: Request) -> dict[str, Any]:
     token = _extract_bearer(request)
     if not token:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "Authentication required"},
         )
 
     payload = _decode_token(token)
 
     if payload.get("account_type") != "admin":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Admin access required"},
         )
 
     return payload
@@ -80,7 +84,8 @@ async def get_current_active_auth_admin(request: Request) -> dict[str, Any]:
 async def verify_service_key(x_service_key: str = Header(...)) -> None:
     if x_service_key != SERVICE_KEY:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid service key"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "Invalid service key"},
         )
 
 
@@ -88,7 +93,8 @@ def get_seller_id(payload: dict[str, Any]) -> UUID:
     sub = payload.get("sub") or payload.get("id")
     if not sub:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "Invalid token payload"},
         )
     return UUID(str(sub))
 
@@ -98,16 +104,25 @@ async def seller_or_service_key(request: Request) -> dict[str, Any] | None:
     service_key = request.headers.get("X-Service-Key") or request.headers.get("x-service-key")
     if service_key:
         if service_key != SERVICE_KEY:
-            raise HTTPException(status_code=401, detail="Invalid service key")
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "UNAUTHORIZED", "message": "Invalid service key"},
+            )
         return None  # service key mode: no seller ownership check
 
     token = _extract_bearer(request)
     if not token:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "UNAUTHORIZED", "message": "Authentication required"},
+        )
 
     payload = _decode_token(token)
     if payload.get("account_type") not in ("seller", "admin"):
-        raise HTTPException(status_code=403, detail="Seller access required")
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "FORBIDDEN", "message": "Seller access required"},
+        )
     return payload
 
 
