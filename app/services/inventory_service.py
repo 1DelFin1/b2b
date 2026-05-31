@@ -68,7 +68,11 @@ class InventoryService:
 
         if failed_items:
             from fastapi import HTTPException
-            raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_STOCK", "failed_items": [f.model_dump(mode="json") for f in failed_items]})
+            raise HTTPException(status_code=409, detail={
+                "code": "INSUFFICIENT_STOCK",
+                "message": "One or more SKUs cannot be reserved due to insufficient stock",
+                "failed_items": [f.model_dump(mode="json") for f in failed_items],
+            })
 
         # Apply reservations
         reserved_items: list[ReserveItemResult] = []
@@ -109,7 +113,7 @@ class InventoryService:
         session: AsyncSession,
         data: InventoryOrderRequest,
     ) -> InventoryOrderResponse:
-        # Load all reservations for this order
+        # Idempotency: if no reservation records exist, already unreserved
         reservations_stmt = (
             select(ReservedProductModel)
             .where(ReservedProductModel.order_id == data.order_id)
@@ -117,27 +121,27 @@ class InventoryService:
         )
         reservations = list((await session.scalars(reservations_stmt)).all())
 
-        # Build quantity map from reservations (source of truth for what was reserved)
-        reserved_qty_map: dict[UUID, int] = {}
-        for res in reservations:
-            reserved_qty_map[res.sku_id] = reserved_qty_map.get(res.sku_id, 0) + res.quantity
+        if reservations:
+            # Use quantities from the request (canonical source of truth per B2B-8)
+            qty_map: dict[UUID, int] = {}
+            for item in data.items:
+                qty_map[item.sku_id] = qty_map.get(item.sku_id, 0) + item.quantity
 
-        if reserved_qty_map:
             sku_stmt = (
                 select(SKUModel)
-                .where(SKUModel.id.in_(list(reserved_qty_map.keys())))
+                .where(SKUModel.id.in_(list(qty_map.keys())))
                 .with_for_update()
             )
             skus = list((await session.scalars(sku_stmt)).all())
             for sku in skus:
-                release_qty = reserved_qty_map.get(sku.id, 0)
+                release_qty = qty_map.get(sku.id, 0)
                 sku.reserved_quantity = max(0, sku.reserved_quantity - release_qty)
 
-        # Delete reservation records
-        delete_stmt = delete(ReservedProductModel).where(
-            ReservedProductModel.order_id == data.order_id
-        )
-        await session.execute(delete_stmt)
+            delete_stmt = delete(ReservedProductModel).where(
+                ReservedProductModel.order_id == data.order_id
+            )
+            await session.execute(delete_stmt)
+
         await session.commit()
 
         return InventoryOrderResponse(

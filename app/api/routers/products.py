@@ -78,11 +78,13 @@ async def list_products(
         return ProductPublicPaginatedResponse(items=short_items, total_count=total, limit=limit, offset=offset)
 
     # Seller mode: authenticated via Bearer JWT
+    # seller_id is taken from JWT only — query param is ignored (IDOR prevention)
     actual_seller_id = get_seller_id(payload)
     items, total = await ProductService.get_list(
         session,
         seller_id=actual_seller_id,
         status=status,
+        search=search,
         deleted=include_deleted,
         limit=limit,
         offset=offset,
@@ -98,6 +100,8 @@ async def list_products(
             created_at=row["product"].created_at,
             min_price=row["min_price"],
             cover_image=row["cover_image"],
+            skus_count=row.get("skus_count", 0),
+            total_active_quantity=row.get("total_active_quantity", 0),
         )
         for row in items
     ]

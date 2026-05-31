@@ -199,18 +199,19 @@ class SKUService:
     ) -> None:
         sku = await cls.get_by_id(session, sku_id)
 
-        if sku.reserved_quantity > 0:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "CONFLICT", "message": "Cannot delete SKU with active reserves"},
-            )
-
+        # Ownership must be checked before any state-leaking check (IDOR prevention)
         product = await cls._verify_product_ownership(session, sku.product_id, seller_id)
 
         if product.status == ProductStatus.HARD_BLOCKED:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"code": "FORBIDDEN", "message": "Cannot delete SKU of hard-blocked product"},
+            )
+
+        if sku.reserved_quantity > 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "CONFLICT", "message": "Cannot delete SKU with active reserves"},
             )
 
         product_id = sku.product_id

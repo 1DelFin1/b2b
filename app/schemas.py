@@ -143,6 +143,8 @@ class ProductShortResponse(BaseModel):
     created_at: datetime
     min_price: int | None = None
     cover_image: str | None = None
+    skus_count: int = 0
+    total_active_quantity: int = 0
 
 
 class ProductResponse(BaseModel):

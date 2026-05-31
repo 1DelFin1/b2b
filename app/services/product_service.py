@@ -83,6 +83,20 @@ class ProductService:
             .scalar_subquery()
         )
 
+        skus_count_subq = (
+            select(func.count(SKUModel.id))
+            .where(SKUModel.product_id == ProductModel.id)
+            .correlate(ProductModel)
+            .scalar_subquery()
+        )
+
+        total_active_subq = (
+            select(func.coalesce(func.sum(SKUModel.stock_quantity - SKUModel.reserved_quantity), 0))
+            .where(SKUModel.product_id == ProductModel.id)
+            .correlate(ProductModel)
+            .scalar_subquery()
+        )
+
         if min_price is not None:
             conditions.append(min_price_subq >= min_price)
         if max_price is not None:
@@ -95,6 +109,8 @@ class ProductService:
             ProductModel,
             min_price_subq.label("min_price"),
             cover_image_subq.label("cover_image"),
+            skus_count_subq.label("skus_count"),
+            total_active_subq.label("total_active_quantity"),
         ).where(*conditions)
 
         if sort == "price_asc":
@@ -114,11 +130,13 @@ class ProductService:
 
         results = []
         for row in rows:
-            product, min_price_val, cover_image = row
+            product, min_price_val, cover_image, skus_count, total_active = row
             results.append({
                 "product": product,
                 "min_price": min_price_val,
                 "cover_image": cover_image,
+                "skus_count": skus_count or 0,
+                "total_active_quantity": total_active or 0,
             })
 
         return results, total_count
