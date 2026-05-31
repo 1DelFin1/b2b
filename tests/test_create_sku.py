@@ -29,7 +29,20 @@ def _make_product(status: str = "CREATED", seller_id: uuid.UUID = TEST_SELLER_ID
     m = MagicMock()
     m.id = PRODUCT_ID
     m.seller_id = seller_id
+    m.category_id = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    m.title = "iPhone 15 Pro Max"
+    m.slug = "iphone-15-pro-max"
+    m.description = "Флагман Apple"
     m.status = status
+    m.deleted = False
+    m.blocking_reason_id = None
+    m.moderator_comment = None
+    m.field_reports = []
+    m.characteristics = []
+    m.images = []
+    m.skus = []
+    m.created_at = datetime.now(timezone.utc)
+    m.updated_at = datetime.now(timezone.utc)
     return m
 
 
@@ -183,3 +196,81 @@ async def test_unauthenticated_returns_401(client, mock_session):
     body = resp.json()
     assert body["code"] == "UNAUTHORIZED"
     assert "detail" not in body
+
+
+# ── B2B-2 rule from 2026-05-27: add SKU to MODERATED/BLOCKED → re-moderation ─
+
+@pytest.mark.asyncio
+async def test_add_sku_to_moderated_product_transitions_to_on_moderation(client, mock_session):
+    """Добавление SKU к MODERATED товару → ON_MODERATION + событие EDITED (правило с 2026-05-27)."""
+    product = _make_product(status="MODERATED")
+    mock_session.get = AsyncMock(return_value=product)
+
+    with patch(
+        "app.services.product_service.ProductService._load_full",
+        new=AsyncMock(return_value=product),
+    ), patch(
+        "app.services.event_service.send_product_event_to_moderation",
+        new=AsyncMock(),
+    ) as mock_event:
+        mock_session.scalar = AsyncMock(return_value=_make_sku())
+        resp = await client.post(
+            "/api/v1/skus",
+            json=VALID_SKU_PAYLOAD,
+            headers={"Authorization": f"Bearer {make_seller_token()}"},
+        )
+
+    assert resp.status_code == 201
+    assert product.status == "ON_MODERATION"
+    mock_event.assert_called_once()
+    *_, event_type = mock_event.call_args.args
+    assert event_type == "EDITED"
+
+
+@pytest.mark.asyncio
+async def test_add_sku_to_blocked_product_transitions_to_on_moderation(client, mock_session):
+    """Добавление SKU к BLOCKED товару → ON_MODERATION + событие EDITED (правило с 2026-05-27)."""
+    product = _make_product(status="BLOCKED")
+    mock_session.get = AsyncMock(return_value=product)
+
+    with patch(
+        "app.services.product_service.ProductService._load_full",
+        new=AsyncMock(return_value=product),
+    ), patch(
+        "app.services.event_service.send_product_event_to_moderation",
+        new=AsyncMock(),
+    ) as mock_event:
+        mock_session.scalar = AsyncMock(return_value=_make_sku())
+        resp = await client.post(
+            "/api/v1/skus",
+            json=VALID_SKU_PAYLOAD,
+            headers={"Authorization": f"Bearer {make_seller_token()}"},
+        )
+
+    assert resp.status_code == 201
+    assert product.status == "ON_MODERATION"
+    mock_event.assert_called_once()
+    *_, event_type = mock_event.call_args.args
+    assert event_type == "EDITED"
+
+
+@pytest.mark.asyncio
+async def test_add_sku_to_on_moderation_no_event(client, mock_session):
+    """Добавление SKU к товару в ON_MODERATION — статус не меняется, событие не отправляется."""
+    product = _make_product(status="ON_MODERATION")
+    mock_session.get = AsyncMock(return_value=product)
+    mock_session.scalar = AsyncMock(return_value=_make_sku())
+
+    with patch(
+        "app.services.event_service.send_product_event_to_moderation",
+        new=AsyncMock(),
+    ) as mock_event:
+        resp = await client.post(
+            "/api/v1/skus",
+            json=VALID_SKU_PAYLOAD,
+            headers={"Authorization": f"Bearer {make_seller_token()}"},
+        )
+
+    assert resp.status_code == 201
+    assert product.status == "ON_MODERATION"
+    mock_event.assert_not_called()

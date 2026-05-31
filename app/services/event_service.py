@@ -90,12 +90,16 @@ async def send_product_event_to_b2c(
     sku_ids: list[UUID],
 ) -> None:
     from app.core.config import settings
+    # B2C OpenAPI: {event_type, idempotency_key, occurred_at, payload}
+    # Canon requires sku_ids in payload so B2C can mark cart items unavailable
     payload = {
+        "event_type": event,
         "idempotency_key": str(uuid4()),
-        "event": event,
-        "product_id": str(product_id),
-        "sku_ids": [str(s) for s in sku_ids],
-        "date": datetime.now(timezone.utc).isoformat(),
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+        "payload": {
+            "product_id": str(product_id),
+            "sku_ids": [str(s) for s in sku_ids],
+        },
     }
     await _post(
         f"{settings.service.B2C_URL}{B2C_EVENTS_PATH}",
@@ -107,10 +111,12 @@ async def send_product_event_to_b2c(
 async def send_sku_out_of_stock(sku_ids: list[UUID]) -> None:
     from app.core.config import settings
     payload = {
+        "event_type": "SKU_OUT_OF_STOCK",
         "idempotency_key": str(uuid4()),
-        "event": "SKU_OUT_OF_STOCK",
-        "sku_ids": [str(s) for s in sku_ids],
-        "date": datetime.now(timezone.utc).isoformat(),
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+        "payload": {
+            "sku_ids": [str(s) for s in sku_ids],
+        },
     }
     await _post(
         f"{settings.service.B2C_URL}{B2C_EVENTS_PATH}",

@@ -82,6 +82,20 @@ class SKUService:
             )
 
         is_first_sku = product.status == ProductStatus.CREATED
+        # Canon B2B-2 (rule from 2026-05-27): adding SKU to MODERATED/BLOCKED also triggers re-moderation
+        triggers_edit = product.status in (ProductStatus.MODERATED, ProductStatus.BLOCKED)
+
+        # Capture json_before snapshot BEFORE adding the new SKU (needed for EDITED event payload)
+        json_before = None
+        if triggers_edit:
+            from app.schemas import ProductResponse as _PR
+            from app.services.product_service import ProductService
+            full_before = await ProductService._load_full(session, product.id)
+            raw = _PR.model_validate(full_before).model_dump(mode="json")
+            for s in raw.get("skus", []):
+                s.pop("cost_price", None)
+                s.pop("reserved_quantity", None)
+            json_before = raw
 
         characteristics = [
             {"id": str(uuid4()), "name": c.name, "value": c.value}
@@ -103,15 +117,17 @@ class SKUService:
         for img in data.images:
             session.add(SKUImageModel(sku_id=sku.id, url=img.url, ordering=img.ordering))
 
-        if is_first_sku:
+        if is_first_sku or triggers_edit:
             product.status = ProductStatus.ON_MODERATION
 
         await session.commit()
 
         # Fire after commit so the transaction is safe regardless of Moderation availability
+        from app.services.event_service import send_product_event_to_moderation
         if is_first_sku:
-            from app.services.event_service import send_product_event_to_moderation
             await send_product_event_to_moderation(session, data.product_id, product.seller_id, "CREATED")
+        elif triggers_edit:
+            await send_product_event_to_moderation(session, data.product_id, product.seller_id, "EDITED", json_before=json_before)
 
         stmt = select(SKUModel).where(SKUModel.id == sku.id).options(selectinload(SKUModel.images))
         return await session.scalar(stmt)
