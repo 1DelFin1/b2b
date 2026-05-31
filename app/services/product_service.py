@@ -29,6 +29,7 @@ class ProductService:
         min_price: int | None = None,
         max_price: int | None = None,
         seller_id_filter: UUID | None = None,
+        ids: list[UUID] | None = None,
         sort: str | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -56,6 +57,8 @@ class ProductService:
             conditions.append(ProductModel.status == status)
         if seller_id_filter is not None:
             conditions.append(ProductModel.seller_id == seller_id_filter)
+        if ids is not None:
+            conditions.append(ProductModel.id.in_(ids))
         if search is not None:
             conditions.append(
                 or_(

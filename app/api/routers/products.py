@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from app.api.deps import SessionDep, SellerDep, SellerOrServiceKeyDep, get_seller_id
 from app.schemas import (
@@ -10,6 +10,8 @@ from app.schemas import (
     ProductResponse,
     ProductDetailResponse,
     ProductPublicResponse,
+    ProductPublicPaginatedResponse,
+    ProductPublicShortResponse,
     ProductShortResponse,
     ProductPaginatedResponse,
 )
@@ -18,19 +20,68 @@ from app.services.product_service import ProductService
 products_router = APIRouter(prefix="/api/v1/products", tags=["products"])
 
 
-@products_router.get("", response_model=ProductPaginatedResponse)
+@products_router.get("", response_model=None)
 async def list_products(
     session: SessionDep,
-    payload: SellerDep,
+    payload: SellerOrServiceKeyDep,
+    # seller-only params
     status: Annotated[Literal["CREATED", "ON_MODERATION", "MODERATED", "BLOCKED", "HARD_BLOCKED"] | None, Query()] = None,
     include_deleted: bool = False,
+    # B2C catalog params
+    ids: str | None = Query(default=None, description="Comma-separated product UUIDs (B2C batch)"),
+    category_id: UUID | None = None,
+    search: str | None = Query(default=None, min_length=3),
+    min_price: int | None = Query(default=None, ge=0),
+    max_price: int | None = Query(default=None, ge=0),
+    seller_id: UUID | None = None,
+    sort: Annotated[Literal["price_asc", "price_desc", "created_desc", "popular"], Query()] = "created_desc",
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    seller_id = get_seller_id(payload)
+    if payload is None:
+        # B2C mode: authenticated via X-Service-Key
+        ids_list = None
+        if ids:
+            try:
+                ids_list = [UUID(i.strip()) for i in ids.split(",") if i.strip()]
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "INVALID_REQUEST", "message": "Invalid UUID in ids parameter"},
+                )
+
+        items, total = await ProductService.get_list(
+            session,
+            category_id=category_id,
+            search=search,
+            min_price=min_price,
+            max_price=max_price,
+            seller_id_filter=seller_id,
+            ids=ids_list,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        short_items = [
+            ProductPublicShortResponse(
+                id=row["product"].id,
+                title=row["product"].title,
+                slug=row["product"].slug,
+                status=row["product"].status,
+                category_id=row["product"].category_id,
+                min_price=row["min_price"] or 0,
+                cover_image=row["cover_image"],
+                created_at=row["product"].created_at,
+            )
+            for row in items
+        ]
+        return ProductPublicPaginatedResponse(items=short_items, total_count=total, limit=limit, offset=offset)
+
+    # Seller mode: authenticated via Bearer JWT
+    actual_seller_id = get_seller_id(payload)
     items, total = await ProductService.get_list(
         session,
-        seller_id=seller_id,
+        seller_id=actual_seller_id,
         status=status,
         deleted=include_deleted,
         limit=limit,
