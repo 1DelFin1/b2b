@@ -73,6 +73,12 @@ class InvoiceService:
         seller_id: UUID,
         data: InvoiceCreate,
     ) -> InvoiceModel:
+        if not data.items:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "INVALID_REQUEST", "message": "At least one item is required"},
+            )
+
         # Fetch SKU names for denormalization
         sku_ids = [item.sku_id for item in data.items]
         sku_stmt = select(SKUModel).where(SKUModel.id.in_(sku_ids))
@@ -101,7 +107,7 @@ class InvoiceService:
 
         invoice = InvoiceModel(
             seller_id=seller_id,
-            status=InvoiceStatus.CREATED,
+            status=InvoiceStatus.PENDING,
         )
         session.add(invoice)
         await session.flush()  # get invoice.id without committing

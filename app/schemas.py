@@ -277,12 +277,13 @@ class InvoiceItemResponse(BaseModel):
 
     id: UUID
     sku_id: UUID
+    sku_name: str | None = None
     quantity: int
-    accepted_quantity: int = 0
+    accepted_quantity: int | None = None
 
 
 class InvoiceCreate(BaseModel):
-    items: list[InvoiceItemCreate] = Field(min_length=1)
+    items: list[InvoiceItemCreate] = Field(default_factory=list)
 
 
 class InvoiceAcceptItemRequest(BaseModel):

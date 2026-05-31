@@ -14,7 +14,7 @@ invoices_router = APIRouter(prefix="/api/v1/invoices", tags=["invoices"])
 async def list_invoices(
     session: SessionDep,
     payload: SellerDep,
-    status: Annotated[Literal["CREATED", "PARTIALLY_ACCEPTED", "ACCEPTED", "CANCELLED"] | None, Query()] = None,
+    status: Annotated[Literal["PENDING", "PARTIALLY_ACCEPTED", "ACCEPTED", "CANCELLED"] | None, Query()] = None,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
