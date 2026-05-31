@@ -81,8 +81,8 @@ async def get_current_active_auth_admin(request: Request) -> dict[str, Any]:
     return payload
 
 
-async def verify_service_key(x_service_key: str = Header(...)) -> None:
-    if x_service_key != SERVICE_KEY:
+async def verify_service_key(x_service_key: str | None = Header(default=None)) -> None:
+    if not x_service_key or x_service_key != SERVICE_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "UNAUTHORIZED", "message": "Invalid service key"},

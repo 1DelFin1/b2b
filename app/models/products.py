@@ -40,6 +40,7 @@ class ProductModel(Base, TimestampMixin):
     blocking_reason_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     moderator_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     field_reports: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default="'[]'::json")
+    last_moderation_idempotency_key: Mapped[str | None] = mapped_column(String(36), nullable=True)
     characteristics: Mapped[list] = mapped_column(
         JSON, nullable=False, default=list, server_default="'[]'::json"
     )

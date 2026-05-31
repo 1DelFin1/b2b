@@ -294,6 +294,11 @@ class ProductService:
                 status_code=403,
                 detail={"code": "NOT_OWNER", "message": "Product does not belong to the authenticated seller"},
             )
+        if product.status == ProductStatus.HARD_BLOCKED:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "FORBIDDEN", "message": "Cannot delete hard-blocked product"},
+            )
 
         # Collect SKU IDs before deletion for cascade event
         sku_ids_stmt = select(SKUModel.id).where(SKUModel.product_id == product.id)
@@ -310,10 +315,14 @@ class ProductService:
         cls,
         session: AsyncSession,
         event: ModerationEventRequest,
-    ) -> ProductModel:
+    ) -> None:
         product = await session.get(ProductModel, event.product_id)
         if product is None:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Product not found"})
+
+        # Idempotency: skip if this exact event was already applied
+        if product.last_moderation_idempotency_key == str(event.idempotency_key):
+            return
 
         incoming_event = event.event_type.upper()
 
@@ -328,29 +337,21 @@ class ProductService:
             product.blocking_reason_id = event.blocking_reason_id
             product.moderator_comment = event.moderator_comment
             if event.field_reports is not None:
-                product.field_reports = event.field_reports
+                product.field_reports = [fr.model_dump() for fr in event.field_reports]
         else:
             raise HTTPException(
                 status_code=400,
                 detail={"code": "INVALID_REQUEST", "message": f"Unknown event_type: {event.event_type}"},
             )
 
+        product.last_moderation_idempotency_key = str(event.idempotency_key)
         session.add(product)
         await session.commit()
 
         if incoming_event == "BLOCKED":
             sku_ids_stmt = select(SKUModel.id).where(SKUModel.product_id == product.id)
             sku_ids = list((await session.scalars(sku_ids_stmt)).all())
-            has_stock_stmt = select(func.count()).select_from(SKUModel).where(
-                SKUModel.product_id == product.id,
-                (SKUModel.stock_quantity - SKUModel.reserved_quantity) > 0,
-            )
-            has_stock = (await session.scalar(has_stock_stmt) or 0) > 0
-            if has_stock:
-                await send_product_event_to_b2c("PRODUCT_BLOCKED", product.id, sku_ids)
-
-        loaded = await cls._load_full(session, product.id)
-        return loaded
+            await send_product_event_to_b2c("PRODUCT_BLOCKED", product.id, sku_ids)
 
     @classmethod
     async def get_similar(
