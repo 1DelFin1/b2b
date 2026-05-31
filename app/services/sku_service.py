@@ -134,6 +134,20 @@ class SKUService:
                 detail={"code": "FORBIDDEN", "message": "Cannot edit SKU of a hard-blocked product"},
             )
 
+        needs_moderation = product.status in (ProductStatus.MODERATED, ProductStatus.BLOCKED)
+
+        # Capture json_before snapshot BEFORE applying changes (required by moderation OpenAPI EventProductEdited)
+        json_before = None
+        if needs_moderation:
+            from app.schemas import ProductResponse as _PR
+            from app.services.product_service import ProductService
+            full_before = await ProductService._load_full(session, product.id)
+            raw = _PR.model_validate(full_before).model_dump(mode="json")
+            for s in raw.get("skus", []):
+                s.pop("cost_price", None)
+                s.pop("reserved_quantity", None)
+            json_before = raw
+
         update_data = data.model_dump(exclude_unset=True)
 
         if "characteristics" in update_data and update_data["characteristics"] is not None:
@@ -148,12 +162,12 @@ class SKUService:
         session.add(sku)
         await session.flush()
 
-        if product.status in (ProductStatus.MODERATED, ProductStatus.BLOCKED):
+        if needs_moderation:
             product.status = ProductStatus.ON_MODERATION
             session.add(product)
             await session.flush()
             from app.services.event_service import send_product_event_to_moderation
-            await send_product_event_to_moderation(session, product.id, product.seller_id, "EDITED")
+            await send_product_event_to_moderation(session, product.id, product.seller_id, "EDITED", json_before=json_before)
 
         await session.commit()
 

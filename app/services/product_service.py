@@ -217,12 +217,12 @@ class ProductService:
         if product is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Product not found",
+                detail={"code": "NOT_FOUND", "message": "Product not found"},
             )
         if product.seller_id != seller_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not own this product",
+                detail={"code": "NOT_OWNER", "message": "Product does not belong to the authenticated seller"},
             )
 
         if product.status == ProductStatus.HARD_BLOCKED:
@@ -232,6 +232,18 @@ class ProductService:
             )
 
         prev_status = product.status
+        needs_moderation = prev_status in (ProductStatus.MODERATED, ProductStatus.BLOCKED)
+
+        # Capture json_before snapshot BEFORE applying changes (required by moderation OpenAPI EventProductEdited)
+        json_before = None
+        if needs_moderation:
+            from app.schemas import ProductResponse as _PR
+            full_before = await cls._load_full(session, product_id)
+            raw = _PR.model_validate(full_before).model_dump(mode="json")
+            for sku in raw.get("skus", []):
+                sku.pop("cost_price", None)
+                sku.pop("reserved_quantity", None)
+            json_before = raw
 
         update_data = data.model_dump(exclude_unset=True)
 
@@ -244,10 +256,10 @@ class ProductService:
         for field, value in update_data.items():
             setattr(product, field, value)
 
-        if prev_status in (ProductStatus.MODERATED, ProductStatus.BLOCKED):
+        if needs_moderation:
             product.status = ProductStatus.ON_MODERATION
             await session.flush()
-            await send_product_event_to_moderation(session, product.id, product.seller_id, "EDITED")
+            await send_product_event_to_moderation(session, product.id, product.seller_id, "EDITED", json_before=json_before)
 
         session.add(product)
         await session.commit()
