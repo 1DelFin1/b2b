@@ -481,6 +481,66 @@ class ProductCanonResponse(BaseModel):
         return data
 
 
+# ── ProductDetailResponse (OpenAPI B2B ProductDetailResponse) ─────────────────
+
+class ProductDetailResponse(BaseModel):
+    """Seller-view карточки товара — полный ответ по канону B2B-5 и OpenAPI."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    seller_id: UUID
+    category_id: UUID
+    title: str
+    slug: str | None
+    description: str
+    status: str
+    deleted: bool
+    blocked: bool
+    images: list[ProductImageResponse] = []
+    characteristics: list[CharacteristicResponse] = []
+    skus: list[SKUResponse] = []
+    created_at: datetime
+    updated_at: datetime
+    blocking_reason: BlockingReasonResponse | None = None
+    field_reports: list[FieldReport] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compose(cls, data: object) -> dict:
+        if isinstance(data, dict):
+            return data
+        # Compose nested blocking_reason from flat ORM fields
+        br_id = getattr(data, "blocking_reason_id", None)
+        br_title = getattr(data, "blocking_reason_title", None)
+        blocking_reason = (
+            BlockingReasonResponse(
+                id=br_id,
+                title=br_title,
+                comment=getattr(data, "moderator_comment", None),
+            )
+            if br_id is not None and br_title is not None
+            else None
+        )
+        return {
+            "id": data.id,
+            "seller_id": data.seller_id,
+            "category_id": data.category_id,
+            "title": data.title,
+            "slug": getattr(data, "slug", None),
+            "description": data.description,
+            "status": data.status,
+            "deleted": data.deleted,
+            "blocked": data.blocked,
+            "images": getattr(data, "images", []),
+            "characteristics": getattr(data, "characteristics", []),
+            "skus": getattr(data, "skus", []),
+            "created_at": data.created_at,
+            "updated_at": data.updated_at,
+            "blocking_reason": blocking_reason,
+            "field_reports": getattr(data, "field_reports", []) or [],
+        }
+
+
 # ── Seller ────────────────────────────────────────────────────────────────────
 
 class SellerCreate(BaseModel):

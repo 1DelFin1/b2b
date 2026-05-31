@@ -8,6 +8,7 @@ from app.schemas import (
     ProductCreate,
     ProductUpdate,
     ProductResponse,
+    ProductDetailResponse,
     ProductPublicResponse,
     ProductShortResponse,
     ProductPaginatedResponse,
@@ -63,9 +64,11 @@ async def create_product(session: SessionDep, payload: SellerDep, data: ProductC
 async def get_product(product_id: UUID, session: SessionDep, payload: SellerOrServiceKeyDep):
     seller_id = get_seller_id(payload) if payload else None
     product = await ProductService.get_by_id(session, product_id, seller_id=seller_id)
+    # Service-key callers (Moderation, B2C) get the public view without sensitive fields
     if payload is None:
         return ProductPublicResponse.model_validate(product)
-    return ProductResponse.model_validate(product)
+    # Seller cabinet: full view with cost_price, reserved_quantity, blocking_reason, field_reports
+    return ProductDetailResponse.model_validate(product)
 
 
 @products_router.patch("/{product_id}", response_model=ProductResponse)
