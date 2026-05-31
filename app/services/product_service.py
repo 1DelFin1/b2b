@@ -60,10 +60,11 @@ class ProductService:
         if ids is not None:
             conditions.append(ProductModel.id.in_(ids))
         if search is not None:
+            _esc = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             conditions.append(
                 or_(
-                    ProductModel.title.ilike(f"%{search}%"),
-                    ProductModel.description.ilike(f"%{search}%"),
+                    ProductModel.title.ilike(f"%{_esc}%", escape="\\"),
+                    ProductModel.description.ilike(f"%{_esc}%", escape="\\"),
                 )
             )
 
