@@ -398,18 +398,41 @@ class ProductService:
             .scalar_subquery()
         )
 
-        stmt = (
-            select(ProductModel, min_price_subq.label("min_price"), cover_subq.label("cover_image"))
-            .where(
-                ProductModel.category_id == product.category_id,
-                ProductModel.id != product_id,
-                ProductModel.status == ProductStatus.MODERATED,
-                ProductModel.deleted == False,  # noqa: E712
+        def _similar_stmt(category_id: UUID) -> any:
+            return (
+                select(ProductModel, min_price_subq.label("min_price"), cover_subq.label("cover_image"))
+                .where(
+                    ProductModel.category_id == category_id,
+                    ProductModel.id != product_id,
+                    ProductModel.status == ProductStatus.MODERATED,
+                    ProductModel.deleted == False,  # noqa: E712
+                )
+                .order_by(func.random())
+                .limit(limit)
             )
-            .order_by(func.random())
-            .limit(limit)
-        )
-        rows = (await session.execute(stmt)).all()
+
+        rows = (await session.execute(_similar_stmt(product.category_id))).all()
+
+        # Fallback: if fewer results than requested, expand to parent category
+        if len(rows) < limit:
+            category = await session.get(CategoryModel, product.category_id)
+            if category is not None and category.parent_id is not None:
+                seen_ids = {row[0].id for row in rows}
+                parent_stmt = (
+                    select(ProductModel, min_price_subq.label("min_price"), cover_subq.label("cover_image"))
+                    .where(
+                        ProductModel.category_id == category.parent_id,
+                        ProductModel.id != product_id,
+                        ProductModel.id.not_in(seen_ids) if seen_ids else True,
+                        ProductModel.status == ProductStatus.MODERATED,
+                        ProductModel.deleted == False,  # noqa: E712
+                    )
+                    .order_by(func.random())
+                    .limit(limit - len(rows))
+                )
+                parent_rows = (await session.execute(parent_stmt)).all()
+                rows = rows + parent_rows
+
         return [{"product": row[0], "min_price": row[1], "cover_image": row[2]} for row in rows]
 
     @classmethod
