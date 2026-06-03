@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class InvoiceStatus(str, Enum):
-    PENDING = "PENDING"
+    CREATED = "CREATED"
     PARTIALLY_ACCEPTED = "PARTIALLY_ACCEPTED"
     ACCEPTED = "ACCEPTED"
     CANCELLED = "CANCELLED"
@@ -26,7 +26,7 @@ class InvoiceModel(Base, TimestampMixin):
 
     id: Mapped[UUID] = mapped_column(default=uuid4, primary_key=True)
     seller_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), index=True)
-    status: Mapped[str] = mapped_column(String(25), default=InvoiceStatus.PENDING)
+    status: Mapped[str] = mapped_column(String(25), default=InvoiceStatus.CREATED)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
 

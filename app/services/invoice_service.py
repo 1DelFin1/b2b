@@ -107,7 +107,7 @@ class InvoiceService:
 
         invoice = InvoiceModel(
             seller_id=seller_id,
-            status=InvoiceStatus.PENDING,
+            status=InvoiceStatus.CREATED,
         )
         session.add(invoice)
         await session.flush()  # get invoice.id without committing
@@ -158,7 +158,7 @@ class InvoiceService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Invoice {invoice_id} not found",
             )
-        if invoice.status not in (InvoiceStatus.PENDING, InvoiceStatus.PARTIALLY_ACCEPTED):
+        if invoice.status not in (InvoiceStatus.CREATED, InvoiceStatus.PARTIALLY_ACCEPTED):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Invoice cannot be accepted in status '{invoice.status}'",
@@ -249,10 +249,10 @@ class InvoiceService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied",
             )
-        if invoice.status != InvoiceStatus.PENDING:
+        if invoice.status != InvoiceStatus.CREATED:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Only PENDING invoices can be cancelled, current status: '{invoice.status}'",
+                detail=f"Only CREATED invoices can be cancelled, current status: '{invoice.status}'",
             )
 
         invoice.status = InvoiceStatus.CANCELLED
